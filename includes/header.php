@@ -315,30 +315,37 @@
                 <div class="dropdown">
                     <button class="nav-btn">Añadir <i class="fas fa-caret-down"></i></button>
                     <div class="dropdown-content">
-                        <a href="anadir_nuevo.php">Nuevo</a>
+                        <a href="/sistema_inventario/productos/anadir/nuevo.php">Nuevo</a>
                         <a href="/sistema_inventario/productos/anadir/reabastecer.php">Reabastecer</a>
-                        <a href="marca_producto.php">Marca</a>
-                        <a href="modelo_producto.php">Modelo</a>
+                        <a href="/sistema_inventario/productos/anadir/marca.php">Marca</a>
+                        <a href="/sistema_inventario/productos/anadir/modelo.php">Modelo</a>
                     </div>
                 </div>
 
-                <a href="buscar.php" class="nav-btn">Buscar</a>
+                <a href="/sistema_inventario/productos/buscar/localizar.php" class="nav-btn">Buscar</a>
 
                 <div class="dropdown">
                     <button class="nav-btn">Eliminar <i class="fas fa-caret-down"></i></button>
                     <div class="dropdown-content">
-                        <a href="borrar_producto.php">Borrar</a>
-                        <a href="reducir.php">Reducir</a>
-                        <a href="marca_producto.php">Marca</a>
-                        <a href="modelo_producto.php">Modelo</a>
+                        <a href="/sistema_inventario/productos/eliminar/borrar.php">Borrar</a>
+                        <a href="/sistema_inventario/productos/eliminar/reducir.php">Reducir</a>
+                        <a href="/sistema_inventario/productos/eliminar/marca.php">Marca</a>
+                        <a href="/sistema_inventario/productos/eliminar/modelo.php">Modelo</a>
                     </div>
                 </div>
 
-                <a href="editar.php" class="nav-btn">Editar</a>
-                <a href="mostrar.php" class="nav-btn">Mostrar</a>
+                   <div class="dropdown">
+                    <button class="nav-btn">Editar <i class="fas fa-caret-down"></i></button>
+                    <div class="dropdown-content">
+                        <a href="/sistema_inventario/productos/editar/ubicacion.php">Ubicación</a>
+                        <a href="/sistema_inventario/productos/editar/precio.php">Precio</a>
+                    </div>
+                </div>
+               
+                <a href="/sistema_inventario/productos/mostrar/inventario.php" class="nav-btn">Mostrar</a>
             
             <?php else: ?>
-                <a href="buscar.php" class="nav-btn">Buscar</a>
+                <a href="/sistema_inventario/productos/buscar/localizar.php" class="nav-btn">Buscar</a>
             <?php endif; ?>
         </nav>
 

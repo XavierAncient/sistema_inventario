@@ -272,9 +272,6 @@
                 <a href="eliminar_personal.php" class="nav-btn">Eliminar</a>
                 <a href="editar_personal.php" class="nav-btn">Editar</a>
                 <a href="mostrar_personal.php" class="nav-btn">Mostrar</a>
-            <?php else: ?>
-                <a href="inicio_personal.php" class="nav-btn">Inicio</a>
-                <a href="buscar_personal.php" class="nav-btn">Buscar</a>
             <?php endif; ?>
         </nav>
 

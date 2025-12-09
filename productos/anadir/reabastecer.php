@@ -1,6 +1,5 @@
 <?php
 session_start();
-// Ajusta la ruta si es necesario
 require_once '../../config/db.php'; 
 
 $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
@@ -14,16 +13,18 @@ if (!isset($_SESSION['usuario_id']) || $_SESSION['usuario_rol'] != 1) {
 if (isset($_GET['ajax_action'])) {
     header('Content-Type: application/json');
     
+    // 1. Obtener Modelos (Igual que antes)
     if ($_GET['ajax_action'] === 'get_modelos' && isset($_GET['id_marca'])) {
-        $stmt = $pdo->prepare("SELECT id_modelo, nombre_modelo, anio_modelo FROM Modelos WHERE id_marca = ?");
+        $stmt = $pdo->prepare("SELECT id_modelo, nombre_modelo, anio_modelo FROM modelos WHERE id_marca = ?");
         $stmt->execute([$_GET['id_marca']]);
         echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
         exit;
     }
 
+    // 2. Obtener Inventario (ADAPTADO A NUEVA DB)
     if ($_GET['ajax_action'] === 'get_inventario' && isset($_GET['id_modelo'])) {
-        // Consulta corregida para tabla 'vidrios'
-        $stmt = $pdo->prepare("SELECT tipo_vidrio, id_calidad, id_ubicacion, stock FROM vidrios WHERE id_modelo = ?");
+        // Consultamos la tabla 'inventario' usando 'id_vidrio'
+        $stmt = $pdo->prepare("SELECT id_vidrio, id_calidad, id_ubicacion, stock FROM inventario WHERE id_modelo = ?");
         $stmt->execute([$_GET['id_modelo']]);
         echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
         exit;
@@ -31,19 +32,20 @@ if (isset($_GET['ajax_action'])) {
     exit;
 }
 
-// --- GUARDAR ---
+// --- GUARDAR (ADAPTADO A NUEVA DB) ---
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'save_batch') {
     try {
         $id_modelo = $_POST['id_modelo'];
-        $items = $_POST['items'] ?? [];
+        $items = $_POST['items'] ?? []; // Ahora el índice de este array será el id_vidrio
+        
         $pdo->beginTransaction();
 
-        foreach ($items as $vidrio => $datos) {
+        foreach ($items as $id_vidrio => $datos) {
             $sel_calidad = $datos['id_calidad'];
             $sel_ubicacion = $datos['id_ubicacion'];
             $inserts = [];
 
-            // Lógica de inserción
+            // Lógica de desglose (Matriz / Split / Simple)
             if ($sel_calidad === 'both' && $sel_ubicacion === 'both') {
                 if (isset($datos['matrix'])) {
                     foreach ($datos['matrix'] as $id_cal => $ubicaciones) {
@@ -69,39 +71,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 if ($cant > 0) $inserts[] = ['cal' => $sel_calidad, 'ub' => $sel_ubicacion, 'cant' => $cant];
             }
 
-            // Ejecutar queries en tabla 'vidrios'
+            // Procesar inserciones en tabla 'inventario'
             foreach ($inserts as $ins) {
-                $stmt = $pdo->prepare("SELECT id_inventario, stock FROM vidrios 
-                                       WHERE id_modelo = ? AND tipo_vidrio = ? AND id_calidad = ? AND id_ubicacion = ?");
-                $stmt->execute([$id_modelo, $vidrio, $ins['cal'], $ins['ub']]);
+                // Verificar existencia usando id_vidrio en tabla inventario
+                $stmt = $pdo->prepare("SELECT id_inventario, stock FROM inventario 
+                                       WHERE id_modelo = ? AND id_vidrio = ? AND id_calidad = ? AND id_ubicacion = ?");
+                $stmt->execute([$id_modelo, $id_vidrio, $ins['cal'], $ins['ub']]);
                 $existente = $stmt->fetch();
 
                 if ($existente) {
-                    $upd = $pdo->prepare("UPDATE vidrios SET stock = stock + ? WHERE id_inventario = ?");
+                    // UPDATE en tabla inventario
+                    $upd = $pdo->prepare("UPDATE inventario SET stock = stock + ? WHERE id_inventario = ?");
                     $upd->execute([$ins['cant'], $existente['id_inventario']]);
                 } else {
-                    $inst = $pdo->prepare("INSERT INTO vidrios (id_modelo, tipo_vidrio, id_calidad, id_ubicacion, stock, precio_unitario) VALUES (?, ?, ?, ?, ?, 0)");
-                    $inst->execute([$id_modelo, $vidrio, $ins['cal'], $ins['ub'], $ins['cant']]);
+                    // ERROR: Producto no existe en sistema
+                    throw new Exception("Imposible de reabastecer: Producto no ingresado dentro del sistema.");
                 }
             }
         }
         
         $pdo->commit();
-        header('Location: admin_inventario.php?ok=batch_success'); 
+        header('Location: ../../index.php?ok=batch_success'); 
         exit;
 
     } catch (Exception $e) {
         $pdo->rollBack();
-        $error = "Error: " . $e->getMessage();
+        $error = $e->getMessage();
     }
 }
 
-// Datos iniciales
-$marcas = $pdo->query("SELECT id_marca, nombre_marca FROM Marcas ORDER BY nombre_marca")->fetchAll();
-$calidades = $pdo->query("SELECT id_calidad, nombre_calidad FROM Calidades")->fetchAll(PDO::FETCH_ASSOC);
-$ubicaciones = $pdo->query("SELECT id_ubicacion, nombre_ubicacion FROM Ubicaciones")->fetchAll(PDO::FETCH_ASSOC);
+// --- CARGA DE DATOS INICIALES (Desde Tablas Catálogo) ---
+$marcas = $pdo->query("SELECT id_marca, nombre_marca FROM marcas ORDER BY nombre_marca")->fetchAll();
+$calidades = $pdo->query("SELECT id_calidad, nombre_calidad FROM calidades")->fetchAll(PDO::FETCH_ASSOC);
+$ubicaciones = $pdo->query("SELECT id_ubicacion, nombre_ubicacion FROM ubicaciones")->fetchAll(PDO::FETCH_ASSOC);
 
-$lista_vidrios = ['Parabrisas Frontal', 'Parabrisas Trasero', 'Ventana Piloto', 'Ventana Copiloto', 'Ventana Acompañante Piloto', 'Ventana Acompañante Copiloto', 'Quarter Piloto', 'Quarter Copiloto'];
+// Cargar tipos de vidrio desde la tabla 'Vidrios' (No hardcoded)
+$lista_vidrios = $pdo->query("SELECT id_vidrio, tipo_vidrio FROM Vidrios ORDER BY id_vidrio")->fetchAll(PDO::FETCH_ASSOC);
+
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -122,16 +128,20 @@ $lista_vidrios = ['Parabrisas Frontal', 'Parabrisas Trasero', 'Ventana Piloto', 
 <body class="bg-light">
 
     <header>
-    <div class="fw-bold">Añadir / Reabastecer</div>
-    <div>
-        <a href="../../index.php" class="btn btn-outline-light btn-sm">Cancelar</a>
-        
-        <button type="button" onclick="submitForm()" class="btn btn-success btn-sm ms-2">Guardar</button>
-    </div>
-</header>
+        <div class="fw-bold">Añadir / Reabastecer</div>
+        <div>
+            <a href="../../index.php" class="btn btn-outline-light btn-sm">Cancelar</a>
+            <button type="button" onclick="submitForm()" class="btn btn-success btn-sm ms-2">Guardar</button>
+        </div>
+    </header>
 
     <div class="container-fluid mt-4 px-4">
-        <?php if (isset($error)): ?><div class="alert alert-danger"><?= $error ?></div><?php endif; ?>
+        
+        <?php if (isset($error)): ?>
+            <div class="alert alert-danger text-center fw-bold shadow-sm">
+                <i class="fas fa-exclamation-triangle"></i> <?= $error ?>
+            </div>
+        <?php endif; ?>
 
         <form id="formReabastecer" method="POST">
             <input type="hidden" name="action" value="save_batch">
@@ -170,12 +180,15 @@ $lista_vidrios = ['Parabrisas Frontal', 'Parabrisas Trasero', 'Ventana Piloto', 
                         </tr>
                     </thead>
                     <tbody>
-                        <?php foreach ($lista_vidrios as $vidrio): ?>
-                        <tr class="row-glass" data-vidrio="<?= $vidrio ?>">
-                            <td class="fw-bold"><?= $vidrio ?></td>
+                        <?php foreach ($lista_vidrios as $v): 
+                            $idVidrio = $v['id_vidrio'];
+                            $nombreVidrio = $v['tipo_vidrio'];
+                        ?>
+                        <tr class="row-glass" data-id-vidrio="<?= $idVidrio ?>">
+                            <td class="fw-bold"><?= htmlspecialchars($nombreVidrio) ?></td>
                             
                             <td>
-                                <select name="items[<?= $vidrio ?>][id_calidad]" class="form-select form-select-sm sel-calidad" onchange="toggleRows(this)">
+                                <select name="items[<?= $idVidrio ?>][id_calidad]" class="form-select form-select-sm sel-calidad" onchange="toggleRows(this)">
                                     <?php foreach ($calidades as $c): ?>
                                         <option value="<?= $c['id_calidad'] ?>"><?= $c['nombre_calidad'] ?></option>
                                     <?php endforeach; ?>
@@ -187,13 +200,13 @@ $lista_vidrios = ['Parabrisas Frontal', 'Parabrisas Trasero', 'Ventana Piloto', 
                                 <?php foreach ($calidades as $c): ?>
                                     <div class="mb-1">
                                         <span class="sub-label"><?= $c['nombre_calidad'] ?>:</span>
-                                        <input type="number" name="items[<?= $vidrio ?>][split_calidad][<?= $c['id_calidad'] ?>]" class="form-control form-control-sm mini-input calc-trigger" min="0" placeholder="0">
+                                        <input type="number" name="items[<?= $idVidrio ?>][split_calidad][<?= $c['id_calidad'] ?>]" class="form-control form-control-sm mini-input calc-trigger" min="0" placeholder="0">
                                     </div>
                                 <?php endforeach; ?>
                             </td>
 
                             <td>
-                                <select name="items[<?= $vidrio ?>][id_ubicacion]" class="form-select form-select-sm sel-ubicacion" onchange="toggleRows(this)">
+                                <select name="items[<?= $idVidrio ?>][id_ubicacion]" class="form-select form-select-sm sel-ubicacion" onchange="toggleRows(this)">
                                     <?php foreach ($ubicaciones as $u): ?>
                                         <option value="<?= $u['id_ubicacion'] ?>"><?= $u['nombre_ubicacion'] ?></option>
                                     <?php endforeach; ?>
@@ -206,11 +219,10 @@ $lista_vidrios = ['Parabrisas Frontal', 'Parabrisas Trasero', 'Ventana Piloto', 
                                     <?php foreach ($ubicaciones as $u): ?>
                                         <div class="mb-1">
                                             <span class="sub-label"><?= $u['nombre_ubicacion'] ?>:</span>
-                                            <input type="number" name="items[<?= $vidrio ?>][split_ubicacion][<?= $u['id_ubicacion'] ?>]" class="form-control form-control-sm mini-input calc-trigger" min="0" placeholder="0">
+                                            <input type="number" name="items[<?= $idVidrio ?>][split_ubicacion][<?= $u['id_ubicacion'] ?>]" class="form-control form-control-sm mini-input calc-trigger" min="0" placeholder="0">
                                         </div>
                                     <?php endforeach; ?>
                                 </div>
-
                                 <div class="box-matrix d-none">
                                     <small class="text-primary d-block mb-1">Desglose Total:</small>
                                     <?php foreach ($calidades as $c): ?>
@@ -220,7 +232,7 @@ $lista_vidrios = ['Parabrisas Frontal', 'Parabrisas Trasero', 'Ventana Piloto', 
                                                     <?= $c['nombre_calidad'] ?> &#8594; <?= $u['nombre_ubicacion'] ?>:
                                                 </span>
                                                 <input type="number" 
-                                                       name="items[<?= $vidrio ?>][matrix][<?= $c['id_calidad'] ?>][<?= $u['id_ubicacion'] ?>]" 
+                                                       name="items[<?= $idVidrio ?>][matrix][<?= $c['id_calidad'] ?>][<?= $u['id_ubicacion'] ?>]" 
                                                        class="form-control form-control-sm mini-input calc-trigger matrix-input" 
                                                        min="0" placeholder="0">
                                             </div>
@@ -231,7 +243,7 @@ $lista_vidrios = ['Parabrisas Frontal', 'Parabrisas Trasero', 'Ventana Piloto', 
 
                             <td><input type="text" class="form-control form-control-sm text-center input-stock" readonly value="-"></td>
                             
-                            <td><input type="number" name="items[<?= $vidrio ?>][cantidad_final]" class="form-control form-control-sm fw-bold input-total" readonly value="0"></td>
+                            <td><input type="number" name="items[<?= $idVidrio ?>][cantidad_final]" class="form-control form-control-sm fw-bold input-total" readonly value="0"></td>
                         </tr>
                         <?php endforeach; ?>
                     </tbody>
@@ -241,8 +253,8 @@ $lista_vidrios = ['Parabrisas Frontal', 'Parabrisas Trasero', 'Ventana Piloto', 
     </div>
 
     <script>
-        // --- JS LOGIC ---
-
+        // --- JS LOGIC --- (Casi igual, solo cambia cómo leemos el ID)
+        
         function toggleRows(selectElement) {
             const row = selectElement.closest('tr');
             const valCalidad = row.querySelector('.sel-calidad').value;
@@ -254,40 +266,26 @@ $lista_vidrios = ['Parabrisas Frontal', 'Parabrisas Trasero', 'Ventana Piloto', 
             const boxMatrix = row.querySelector('.box-matrix');
             const inputTotal = row.querySelector('.input-total');
 
-            // Resetear triggers para evitar cálculos residuales
             row.querySelectorAll('.calc-trigger').forEach(i => i.value = ''); 
             inputTotal.removeAttribute('readonly'); 
 
-            // --- LÓGICA DE VISIBILIDAD DE COLUMNAS ---
-            
-            // 1. ¿Mostrar Detalles Calidad?
-            // SOLO si Calidad = Ambos Y Ubicacion != Ambos
             if (valCalidad === 'both' && valUbicacion !== 'both') {
                 cellDetCal.classList.add('show-col');
                 inputTotal.setAttribute('readonly', true);
             } else {
-                // Si ambos son 'both', ocultamos esta columna para que solo se vea la matriz en Ubicación
                 cellDetCal.classList.remove('show-col');
             }
 
-            // 2. ¿Mostrar Detalles Ubicación?
             if (valUbicacion === 'both') {
                 cellDetUbi.classList.add('show-col');
                 inputTotal.setAttribute('readonly', true);
-                
                 if (valCalidad === 'both') {
-                    // MODO MATRIZ (Ambos + Ambos) -> Solo esta columna visible
                     boxSplitUbi.classList.add('d-none');
                     boxMatrix.classList.remove('d-none');
-                    
-                    // Desactivamos inputs de calidad para que no interfieran en el POST
                     cellDetCal.querySelectorAll('input').forEach(el => el.disabled = true);
                 } else {
-                    // MODO SOLO UBICACIÓN
                     boxSplitUbi.classList.remove('d-none');
                     boxMatrix.classList.add('d-none');
-                    
-                    // Reactivamos inputs de calidad si estuvieran desactivados
                     cellDetCal.querySelectorAll('input').forEach(el => el.disabled = false);
                 }
             } else {
@@ -295,33 +293,21 @@ $lista_vidrios = ['Parabrisas Frontal', 'Parabrisas Trasero', 'Ventana Piloto', 
                 boxMatrix.classList.add('d-none');
                 cellDetCal.querySelectorAll('input').forEach(el => el.disabled = false);
             }
-
             checkHeaders();
             calculateTotal(row);
         }
 
-        // Lógica de Cabeceras: Verificar todos los estados de fila
         function checkHeaders() {
             let showCalHeader = false;
             let showUbiHeader = false;
-
             document.querySelectorAll('.row-glass').forEach(row => {
                 const c = row.querySelector('.sel-calidad').value;
                 const u = row.querySelector('.sel-ubicacion').value;
-
-                // Cabecera Calidad: Mostrar si hay alguna fila que sea Ambos PERO NO Ubicación Ambos
-                if (c === 'both' && u !== 'both') {
-                    showCalHeader = true;
-                }
-                // Cabecera Ubicación: Mostrar si hay alguna fila con Ubicación Ambos
-                if (u === 'both') {
-                    showUbiHeader = true;
-                }
+                if (c === 'both' && u !== 'both') showCalHeader = true;
+                if (u === 'both') showUbiHeader = true;
             });
-
             const thCal = document.querySelector('th.detail-calidad');
             const thUbi = document.querySelector('th.detail-ubicacion');
-
             if(showCalHeader) thCal.classList.add('show-col'); else thCal.classList.remove('show-col');
             if(showUbiHeader) thUbi.classList.add('show-col'); else thUbi.classList.remove('show-col');
         }
@@ -331,31 +317,20 @@ $lista_vidrios = ['Parabrisas Frontal', 'Parabrisas Trasero', 'Ventana Piloto', 
             const valUb = row.querySelector('.sel-ubicacion').value;
             const inputTotal = row.querySelector('.input-total');
             let sum = 0;
-
             if (valCal === 'both' && valUb === 'both') {
-                // Sumar Matriz
                 row.querySelectorAll('.box-matrix input').forEach(inp => sum += Number(inp.value));
-                inputTotal.value = sum;
-            } 
-            else if (valCal === 'both') {
-                // Sumar Detalles Calidad
+            } else if (valCal === 'both') {
                 row.querySelectorAll('.detail-calidad input:not(:disabled)').forEach(inp => sum += Number(inp.value));
-                inputTotal.value = sum;
-            } 
-            else if (valUb === 'both') {
-                // Sumar Detalles Ubicación
+            } else if (valUb === 'both') {
                 row.querySelectorAll('.box-split-ubicacion input').forEach(inp => sum += Number(inp.value));
-                inputTotal.value = sum;
             } 
+            if(valCal === 'both' || valUb === 'both') inputTotal.value = sum;
         }
 
         document.addEventListener('input', function(e) {
-            if(e.target.classList.contains('calc-trigger')) {
-                calculateTotal(e.target.closest('tr'));
-            }
+            if(e.target.classList.contains('calc-trigger')) calculateTotal(e.target.closest('tr'));
         });
 
-        // --- CARGA DE DATOS ---
         const selectMarca = document.getElementById('selectMarca');
         const selectModelo = document.getElementById('selectModelo');
         const inputAnio = document.getElementById('inputAnio');
@@ -394,13 +369,15 @@ $lista_vidrios = ['Parabrisas Frontal', 'Parabrisas Trasero', 'Ventana Piloto', 
 
         function updateStocks(data) {
             document.querySelectorAll('.row-glass').forEach(row => {
-                const tipo = row.dataset.vidrio;
+                // CAMBIO IMPORTANTE: Leemos el ID numérico del atributo data-id-vidrio
+                const idVidrio = parseInt(row.dataset.idVidrio);
                 const idCal = row.querySelector('.sel-calidad').value;
                 const idUb = row.querySelector('.sel-ubicacion').value;
                 const inputStock = row.querySelector('.input-stock');
                 
                 if (idCal !== 'both' && idUb !== 'both') {
-                    const match = data.find(d => d.tipo_vidrio === tipo && d.id_calidad == idCal && d.id_ubicacion == idUb);
+                    // Comparamos numéricamente con el id_vidrio que viene de DB
+                    const match = data.find(d => d.id_vidrio == idVidrio && d.id_calidad == idCal && d.id_ubicacion == idUb);
                     inputStock.value = match ? match.stock : 0;
                 } else {
                     inputStock.value = 'Var';
@@ -411,17 +388,11 @@ $lista_vidrios = ['Parabrisas Frontal', 'Parabrisas Trasero', 'Ventana Piloto', 
         document.querySelectorAll('.sel-calidad, .sel-ubicacion').forEach(s => {
             s.addEventListener('change', () => {
                 const row = s.closest('tr');
-                // Al cambiar select, forzamos re-chequeo de headers y filas
-                // La función toggleRows se llama sola por el onchange del HTML, 
-                // pero updateStocks necesita saber que algo cambió visualmente
                 const idCal = row.querySelector('.sel-calidad').value;
                 const idUb = row.querySelector('.sel-ubicacion').value;
                 const inputStock = row.querySelector('.input-stock');
-                if (idCal === 'both' || idUb === 'both') {
-                    inputStock.value = 'Mix';
-                } else {
-                    selectModelo.dispatchEvent(new Event('change')); 
-                }
+                if (idCal === 'both' || idUb === 'both') inputStock.value = 'Mix';
+                else selectModelo.dispatchEvent(new Event('change')); 
             });
         });
 
